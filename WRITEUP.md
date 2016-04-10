@@ -32,13 +32,13 @@ flag{nOm-n0M-t@st1e-c00K13}
 
 Once you make an account for the site, you are sent to a page of thoughts which people have recently had. Seems to be some kind of hipster microblogging platform. There are links at the top of the page which apparently let you think and personalize, but you can't access them because your account has not been approved by an admin yet. As this process takes 2-4 days, it's unlikely that you'll be able to access these pages before the end of the CTF. All you can do is view other people's thoughts. The thoughts are truncated on the main page, but clicking them takes you to a URL like `http://127.0.0.1/read.php?thought=354ecf76c94067c7135cbe6e8905727d`.
 
-We know the application is vulnerable, because there are more flags to find. There's a few things which could be problematic with a URL like this. Maybe we can access thoughts we aren't meant to? There's no indication that there are non-public thoughts in this app though, so that seems unlikely. Also, it seems that the identifiers for thoughts are unpredictable, so enumeration is hard. Maybe the GET parameter there is SQL-injectable? Add an apostrophe to find out `http://127.0.0.1/read.php?thought=354ecf76c94067c7135cbe6e8905727d%27`. The result given is this:
+We know the application is vulnerable, because there are more flags to find. There's a few things which could be problematic with a URL like this. Maybe we can access thoughts we aren't meant to? There's no indication that there are non-public thoughts in this app though, so that seems unlikely. Also, it seems that the identifiers for thoughts are unpredictable, so enumeration is hard. Maybe the GET parameter there is SQL-injectable? Add an apostrophe to find out. When we request `http://127.0.0.1/read.php?thought=354ecf76c94067c7135cbe6e8905727d%27` the result given is this:
 
 ```
 Fatal error: Uncaught exception 'Exception' with message 'ID exceeds maximum length' in /var/www/html/storage/fsmodel.php:39 Stack trace: #0 /var/www/html/read.php(7): FSModel::load('354ecf76c94067c...') #1 {main} thrown in /var/www/html/storage/fsmodel.php on line 39
 ```
 
-Not a SQL error, but definitely interesting. IDs for thoughts have a maximum length. Do they have a minimum length? Supply a one-character thought ID to find out. `http://127.0.0.1/read.php?thought=3`
+Not an SQL error, but definitely interesting. IDs for thoughts have a maximum length. Do they have a minimum length? Supply a one-character thought ID to find out. `http://127.0.0.1/read.php?thought=3`
 
 ```
 Fatal error: Uncaught exception 'Exception' with message 'Could not find storage at /var/www/html/data/Thought/3' in /var/www/html/storage/fsmodel.php:45 Stack trace: #0 /var/www/html/read.php(7): FSModel::load('3') #1 {main} thrown in /var/www/html/storage/fsmodel.php on line 45
@@ -50,9 +50,9 @@ Very interesting. It seems the programmer has implemented their own filesystem-b
 * Thought IDs are appended to this path without much, if any, validation
 * The PHP script being executed is at `/var/www/html/read.php`
 
-Trying to read files in the `/data` directory unfortunately doesn't work.
+Trying to read files in the `/data` directory over HTTP unfortunately doesn't work.
 
-Can we trick `read.php` into displaying it's own source? If we request `http://127.0.0.1/read.php?thought=../../read.php' we get the following (it's output as HTML, so I've reformatted it to have nice newlines and indentation).
+Can we trick `read.php` into displaying it's own source? If we request `http://127.0.0.1/read.php?thought=../../read.php` we get the following (it's output as HTML, so I've reformatted it to have nice newlines and indentation).
 
 ```php
 <?php
@@ -154,7 +154,7 @@ xerus,hfrc,9763331cbb5d28781dce64e1b8c8a4c1,true,
 zebra,uk0q,77aeef2799d85ecd68c3f38d372335f0,true,
 ```
 
-The top line contains a flag. This is as far as anyone got in the competion.
+You might have guessed from the name of the class `CSVModel` that it stores models in CSV format. The top line contains a flag. This is as far as anyone got in the competion.
 
 ## Flag 4
 
