@@ -1,0 +1,8 @@
+Data in this directory is secret until the attackers have taken over the entire site.
+
+It may be worthwhile to remove some of the files here while the game is in progress
+but the flags obviously need to stay.
+
+Run setup.php to initialise the game.
+
+You should remove the .git directory else the game is really easy.
