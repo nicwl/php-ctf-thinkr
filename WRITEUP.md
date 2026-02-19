@@ -281,12 +281,12 @@ if __name__ == "__main__":
         multiprocessing.Process(target=worker, args=(i,)).start()
 ```
 
-With 8 workers this takes a few minutes. For example, password `514llh` produces hash `0e323733874908324083991036769039` — a match.
+With 8 workers this takes a few minutes. For example, password `5nszjp2c` produces hash `0e213581143648196021608869553810` — a match.
 
 ### Step 5: Log in
 
 - **Username:** `elephant`
-- **Password:** `514llh` *(or whatever your script found)*
+- **Password:** `5nszjp2c` *(or whatever your script found)*
 
 It works! And crucially, elephant is a **verified** user. The home page now shows a new section at the bottom that unverified users never see:
 
