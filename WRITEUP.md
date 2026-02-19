@@ -258,7 +258,7 @@ We know from the source that passwords are hashed as `md5(salt + password)`. We 
 md5("vunp" + P) matches /^0e[0-9]+$/
 ```
 
-This pattern is rare — roughly 1 in 10 billion MD5 hashes qualify — so sequential enumeration is impractical. The right approach is random sampling across multiple processes, since every guess is independent:
+This pattern is rare — roughly 1 in 300 million MD5 hashes qualify — so brute-force search needs many guesses. The right approach is random sampling across multiple processes, since every guess is independent:
 
 ```python
 import hashlib, random, string, multiprocessing, os
