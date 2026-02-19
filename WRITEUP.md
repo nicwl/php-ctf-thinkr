@@ -176,6 +176,28 @@ The format is `username, salt, hash, verified, photo`. And right there on the fi
 
 That's **flag 5**: the reward for successfully reading the user database.
 
+### Step 4: Discover the flags directory (but can't reach it)
+
+While exploring source files, you'll notice most of them `require_once('config.php')`. Naturally, we read that too:
+
+```
+/read.php?thought=../../config.php
+```
+
+This reveals:
+
+```php
+$GLOBALS['FLAGS_DIR'] = 'flagsflagsflagsflagsflagsflagsflagsflags';
+```
+
+So flags are stored in the filesystem, just like everything else — as files inside a directory with a long, obscure name. Can we traverse directly to them? The path from `/var/www/html/data/Thought/` would be:
+
+```
+../../flagsflagsflagsflagsflagsflagsflagsflags/flag4
+```
+
+Count the characters: **52**. That's well over the 32-character ID limit. The directory name isn't long by accident — it's a deliberate defense that makes the path too long for our traversal exploit. We can *see* where the flags are, but we can't *reach* them this way. We'll need code execution for that.
+
 **Lesson:** When a web app passes filenames or IDs as parameters, always try path traversal (`../`). And when your injection attempts produce error messages, *read them carefully* — even a "failed" attack can leak critical information about the application's internals.
 
 ---
@@ -298,17 +320,7 @@ That last point is critical. The server checks that the uploaded file looks like
 
 ### Finding the flag location
 
-We also need to know where the flag file is. Reading the config:
-
-```
-/read.php?thought=../../config.php
-```
-
-Reveals:
-
-```php
-$GLOBALS['FLAGS_DIR'] = 'flagsflagsflagsflagsflagsflagsflagsflags';
-```
+We already know from reading `config.php` earlier that flags live in a directory called `flagsflagsflagsflagsflagsflagsflagsflags/`. The path was too long for our traversal exploit — but with code execution, there's no such limitation.
 
 ### Crafting the polyglot
 
