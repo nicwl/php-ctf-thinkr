@@ -78,21 +78,33 @@ Those thought IDs look like MD5 hashes. And they're being passed directly as a G
 
 ### Step 1: Try SQL injection (and fail instructively)
 
-The `thought` parameter is pulling data from somewhere using what looks like a hash as a key. Our first instinct: maybe it's a database query? Let's try SQL injection:
+The `thought` parameter is pulling data from somewhere using what looks like a hash as a key. Our first instinct: maybe it's a database query? Let's try SQL injection. We take one of the thought URLs and append a classic payload:
 
 ```
-/read.php?thought=' OR 1=1 --
+/read.php?thought=a8f5f167f44f4964e6c998dee827110c' OR 1=1 --
 ```
 
-We get an error — but it's not a SQL error. It says something far more interesting:
+We get an error, but not the SQL error we expected:
 
 ```
-Could not find storage at /var/www/html/data/Thought/' OR 1=1 --
+ID exceeds maximum length
 ```
 
-This is a goldmine of information. The application just told us:
+Interesting. It's treating the input as an "ID" with a length limit — that doesn't sound like SQL at all. The existing thought IDs are 32-character hex strings, so maybe the limit is 32. Let's try a shorter payload — just replace the ID entirely:
 
-1. **There is no database.** It's using the filesystem.
+```
+/read.php?thought=test
+```
+
+A different error this time, and it's a goldmine:
+
+```
+Could not find storage at /var/www/html/data/Thought/test
+```
+
+The application just told us:
+
+1. **There is no database.** It's using the filesystem to store thoughts as individual files.
 2. **The full path** to where thoughts are stored: `/var/www/html/data/Thought/`
 3. **Our input is concatenated directly into a file path** with no sanitization.
 
