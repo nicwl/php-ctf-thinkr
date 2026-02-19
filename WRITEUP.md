@@ -196,7 +196,7 @@ So flags are stored in the filesystem, just like everything else — as files in
 ../../flagsflagsflagsflagsflagsflagsflagsflags/flag4
 ```
 
-Count the characters: **52**. That's well over the 32-character ID limit. The directory name isn't long by accident — it's a deliberate defense that makes the path too long for our traversal exploit. We can *see* where the flags are, but we can't *reach* them this way. We'll need code execution for that.
+Count the characters: **52**. That's well over the 32-character ID limit. The directory name isn't long by accident — it's a deliberate defense that makes the path too long for our traversal exploit. We can *see* where the flags are, but we can't *reach* them this way. We'll need something else to get there — but we'll get to that.
 
 **Lesson:** When a web app passes filenames or IDs as parameters, always try path traversal (`../`). And when your injection attempts produce error messages, *read them carefully* — even a "failed" attack can leak critical information about the application's internals.
 
